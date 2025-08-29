@@ -11,10 +11,14 @@ export async function POST(request: NextRequest) {
     console.log(`📱 Sending SMS to: ${to}`)
     console.log(`📱 Message: ${message}`)
 
-    // Use your actual Twilio credentials
-    const TWILIO_ACCOUNT_SID = "ACdfe59673055ab0cce4362789af5055dc"
-    const TWILIO_AUTH_TOKEN = "55c3de3f1cea7195f8bc1136692de672"
-    const TWILIO_PHONE_NUMBER = "+18573714241"
+    // Use Twilio credentials from environment
+    const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID
+    const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN
+    const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER
+
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+      return NextResponse.json({ success: false, error: "Twilio not configured" }, { status: 500 })
+    }
 
     try {
       const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64")

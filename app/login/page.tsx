@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Globe, Eye, EyeOff } from "lucide-react"
-import { validateUser, updateUserActivity, initializeSystem } from "@/lib/users"
+import { updateUserActivity, initializeSystem } from "@/lib/users"
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
@@ -27,49 +27,44 @@ export default function LoginPage() {
       // Initialize the user system
       initializeSystem()
 
-      // Admin login
-      if (email === "admin@siteguard.com" && password === "admin123") {
-        const adminUser = {
-          id: "admin",
-          email: "admin@siteguard.com",
-          name: "Admin User",
-          role: "admin",
-        }
-        
-        localStorage.setItem("token", "mock-admin-token")
-        localStorage.setItem("user", JSON.stringify(adminUser))
-        
-        window.location.href = "/admin"
-        return
-      }
+      // Call the login API endpoint
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: email,
+          password: password,
+        }),
+      })
 
-      // Regular user login
-      const user = validateUser(email, password)
-      
-      if (!user) {
-        setError("Email not found or invalid password. Please sign up first.")
+      const data = await response.json()
+
+      if (!response.ok) {
+        setError(data.error || "Login failed. Please try again.")
         setIsLoading(false)
         return
       }
 
       // Track user activity
-      updateUserActivity(user.id)
+      updateUserActivity(data.user.id)
 
       // Store user data
-      localStorage.setItem("token", "mock-user-token")
-      localStorage.setItem("user", JSON.stringify({
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        phone: user.phone,
-        role: user.role,
-      }))
+      localStorage.setItem("token", data.token)
+      localStorage.setItem("user", JSON.stringify(data.user))
 
-      // Redirect to dashboard
-      window.location.href = "/dashboard"
+      console.log("✅ Login successful:", data.user)
+
+      // Redirect to appropriate page
+      if (data.user.role === "admin") {
+        window.location.href = "/admin"
+      } else {
+        window.location.href = "/dashboard"
+      }
     } catch (error) {
       console.error("Login error:", error)
-      setError("Login failed. Please try again.")
+      setError("Login failed. Please check your internet connection and try again.")
     } finally {
       setIsLoading(false)
     }

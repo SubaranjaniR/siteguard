@@ -9,11 +9,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if SendGrid API key is configured
-    if (!process.env.SENDGRID_API_KEY) {
+    if (!process.env.SENDGRID_API_KEY || !process.env.SENDGRID_FROM_EMAIL) {
       return NextResponse.json(
         {
           success: false,
-          error: "SendGrid API key not configured. Please set SENDGRID_API_KEY environment variable.",
+          error: "SendGrid not configured. Set SENDGRID_API_KEY and SENDGRID_FROM_EMAIL.",
         },
         { status: 500 },
       )
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
 
       const msg = {
         to: email,
-        from: "test@siteguard.com", // Make sure this email is verified in SendGrid
+        from: process.env.SENDGRID_FROM_EMAIL,
         subject: subject || "SiteGuard Pro - Test Email",
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">

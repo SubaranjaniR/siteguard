@@ -78,6 +78,8 @@ export async function POST(request: NextRequest) {
         email: emailResult,
         sms: smsResult,
       },
+      // Include user data for localStorage storage
+      userData: newUser,
     })
   } catch (error) {
     console.error("Signup error:", error)

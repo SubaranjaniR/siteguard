@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Globe, Eye, EyeOff, CheckCircle, Loader2 } from "lucide-react"
-import { createUser, getUserByEmail, updateUserActivity, initializeSystem } from "@/lib/users"
+import { updateUserActivity, initializeSystem } from "@/lib/users"
 
 export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false)
@@ -43,43 +43,57 @@ export default function SignupPage() {
       // Initialize the user system
       initializeSystem()
 
-      // Check if user already exists
-      const existingUser = getUserByEmail(formData.email)
-      if (existingUser) {
-        setError("User with this email already exists. Please login instead.")
+      // Call the signup API endpoint that sends welcome email
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          phone: formData.phone,
+          password: formData.password,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setError(data.error || "Registration failed. Please try again.")
         setIsLoading(false)
         return
       }
 
-      // Create new user
-      const newUser = createUser({
-        name: formData.name,
-        email: formData.email,
-        phone: formData.phone,
-        password: formData.password,
-        role: "user",
-        plan: "free",
-      })
-
       // Track user activity
-      updateUserActivity(newUser.id)
+      updateUserActivity(data.user.id)
 
       console.log("✅ Account created successfully!")
-      console.log("👤 Created user:", newUser)
+      console.log("👤 Created user:", data.user)
+      console.log("📧 Email result:", data.notifications?.email)
+      console.log("📱 SMS result:", data.notifications?.sms)
 
       // Store user data for immediate login
       localStorage.setItem("token", "mock-signup-token")
       localStorage.setItem("user", JSON.stringify({
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone,
-        role: newUser.role,
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email,
+        phone: data.user.phone,
+        role: data.user.role,
       }))
+
+      // Store user data for login system
+      if (data.userData) {
+        const existingUsers = JSON.parse(localStorage.getItem('siteguard_users') || '[]')
+        existingUsers.push(data.userData)
+        localStorage.setItem('siteguard_users', JSON.stringify(existingUsers))
+        console.log('✅ User data stored for login system')
+      }
 
       // Show immediate success message
       setSuccessMessage(
-        "✅ Account created successfully! Welcome email and SMS sent to your registered email and phone.",
+        `✅ Account created successfully! Welcome email and SMS sent to ${data.user.email} and ${data.user.phone}.`,
       )
 
       // Redirect to dashboard after showing success message

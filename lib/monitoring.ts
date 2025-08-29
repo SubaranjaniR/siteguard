@@ -1,3 +1,28 @@
+// Returns a grade for website speed based on response time and status
+export function getSpeedGrade(responseTime: number | null, status: string) {
+  if (status === "down" || responseTime === null) return "F"; // fake/offline → always F
+  if (responseTime < 500) return "A";
+  if (responseTime < 1000) return "B";
+  if (responseTime < 2000) return "C";
+  if (responseTime < 3000) return "D";
+  return "F";
+}
+// Save websites to localStorage
+function saveWebsitesToStorage() {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('websites', JSON.stringify(websites))
+  }
+}
+
+// Load websites from localStorage
+function loadWebsitesFromStorage() {
+  if (typeof window !== 'undefined') {
+    const stored = localStorage.getItem('websites')
+    if (stored) {
+      websites = JSON.parse(stored)
+    }
+  }
+}
 // Ensure this is treated as a module
 export {};
 
@@ -72,6 +97,7 @@ export function initializeMonitoring() {
         websites = [];
       }
     }
+    loadWebsitesFromStorage()
     
     // Also load user-specific websites from dashboard
     const userIds = Object.keys(localStorage).filter(key => key.startsWith('websites_'));
@@ -224,10 +250,11 @@ async function checkAllWebsites() {
       } catch (error) {
         console.error(`❌ Failed to check website ${website.name}:`, error)
         // Mark website as down on error
-        website.status = 'down'
-        website.lastChecked = new Date().toISOString()
-        website.responseTime = 0
-        website.uptime = calculateUptime(website.id, 'down')
+  website.status = 'down'
+  website.lastChecked = new Date().toISOString()
+  website.responseTime = 0
+  website.uptime = calculateUptime(website.id, 60)
+  saveWebsitesToStorage()
         
         // Increment error count for recovery
         consecutiveErrors++
@@ -271,12 +298,12 @@ async function checkWebsite(website: Website): Promise<void> {
     
     // Update website status based on response
     const status = success ? 'up' : 'down';
-    const uptime = calculateUptime(website.id, status);
+  const uptime = calculateUptime(website.id, 60);
     
     // Update website object
     website.status = status;
     website.responseTime = responseTime || 0;
-    website.uptime = uptime;
+  website.uptime = calculateUptime(website.id, 60);
     website.lastChecked = new Date().toISOString();
     
     // Log the result
@@ -297,25 +324,25 @@ async function checkWebsite(website: Website): Promise<void> {
     website.status = 'down';
     website.lastChecked = new Date().toISOString();
     website.responseTime = 0;
-    website.uptime = calculateUptime(website.id, 'down');
+  website.uptime = calculateUptime(website.id, 60);
   } finally {
     // Always add to monitoring history, whether successful or not
-    const monitoringData: MonitoringData = {
-      id: `${website.id}_${Date.now()}`,
+    const now = Date.now();
+    const check: MonitoringData = {
+      id: `${website.id}_${now}`,
       websiteId: website.id,
-      timestamp: Date.now(),
+      timestamp: now,
       responseTime: website.responseTime,
       status: website.status as 'up' | 'down',
       uptime: website.uptime,
-      lastChecked: website.lastChecked
+      lastChecked: new Date(now).toISOString()
     };
-    
-    monitoringHistory.push(monitoringData);
-    
+    monitoringHistory.push(check);
+    website.lastChecked = check.lastChecked;
+    saveWebsitesToStorage();
     // Keep only last 24 hours of data
     const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
     monitoringHistory = monitoringHistory.filter(data => data.timestamp > oneDayAgo);
-    
     // Save the updated data
     saveMonitoringData();
   }
@@ -373,15 +400,20 @@ async function realHttpRequest(url: string): Promise<{ success: boolean; statusC
 }
 
 // Calculate uptime percentage
-function calculateUptime(websiteId: string, currentStatus: 'up' | 'down'): number {
-  const recentData = monitoringHistory
-    .filter(data => data.websiteId === websiteId)
-    .slice(-100) // Last 100 checks
-  
-  if (recentData.length === 0) return 100
-  
-  const upCount = recentData.filter(data => data.status === 'up').length
-  return (upCount / recentData.length) * 100
+export function calculateUptime(websiteId: string, windowMinutes = 60): number {
+  const now = Date.now()
+  const windowMs = windowMinutes * 60 * 1000
+
+  const recent = monitoringHistory.filter(
+    d => d.websiteId === websiteId && d.timestamp >= now - windowMs
+  )
+
+  if (recent.length === 0) {
+    return 0 // No checks yet
+  }
+
+  const up = recent.filter(d => d.status === 'up').length
+  return Math.round((up / recent.length) * 10000) / 100 // e.g. 97.45%
 }
 
 // Save monitoring data to localStorage
@@ -497,6 +529,7 @@ export function addWebsite(website: { name: string; url: string; checkInterval?:
       console.error(`Error checking new website ${newWebsite.url}:`, error);
     });
   }
+    saveWebsitesToStorage();
   
   return newWebsite;
 }
@@ -504,7 +537,6 @@ export function addWebsite(website: { name: string; url: string; checkInterval?:
 // Remove website from monitoring
 export function removeWebsite(websiteId: string): boolean {
   try {
-    // ... (rest of the code remains the same)
     // Remove from in-memory array
     const initialLength = websites.length
     websites = websites.filter(w => w.id !== websiteId)
@@ -542,6 +574,7 @@ export function removeWebsite(websiteId: string): boolean {
     }
     
     console.log(`🗑️ Removed website ${websiteId} from monitoring`)
+    saveWebsitesToStorage();
     return websites.length < initialLength
   } catch (error) {
     console.error('Error removing website:', error)
@@ -552,6 +585,7 @@ export function removeWebsite(websiteId: string): boolean {
 // Delete website completely (alias for removeWebsite for clarity)
 export function deleteWebsite(websiteId: string): boolean {
   return removeWebsite(websiteId)
+    saveWebsitesToStorage();
 }
 
 // Get real-time statistics
@@ -561,8 +595,10 @@ export function getRealTimeStats() {
   const offlineWebsites = websites.filter(w => w.status === 'down').length
   const checkingWebsites = websites.filter(w => w.status === 'checking').length
   
-  const avgResponseTime = websites.length > 0 ? 
-    websites.reduce((acc, w) => acc + w.responseTime, 0) / websites.length : 0
+  // Average only among online websites with positive responseTime
+  const onlineWithData = websites.filter(w => w.status === 'up' && w.responseTime > 0)
+  const avgResponseTime = onlineWithData.length > 0 ? 
+    onlineWithData.reduce((acc, w) => acc + w.responseTime, 0) / onlineWithData.length : 0
   
   const avgUptime = websites.length > 0 ? 
     websites.reduce((acc, w) => acc + w.uptime, 0) / websites.length : 100
@@ -624,82 +660,30 @@ export function getIncidents() {
 }
 
 // Get response time history for a specific website (last 24 hours)
-export function getResponseTimeHistory(websiteId: string, hours: number = 24) {
+// lib/monitoring.ts
+
+// NEW: real-time history with minutes window, no fabrication
+export function getResponseTimeHistory(
+  websiteId: string,
+  minutes: number = 15
+): Array<{ time: string; responseTime: number; timestamp: number; status: 'up' | 'down' | 'checking' }> {
   const now = Date.now()
-  const timeRange = hours * 60 * 60 * 1000
-  
-  const recentData = monitoringHistory
-    .filter(data => data.websiteId === websiteId && data.timestamp > now - timeRange)
+  const range = minutes * 60 * 1000
+
+  // Get raw recent checks for this website
+  const recent = monitoringHistory
+    .filter(d => d.websiteId === websiteId && d.timestamp >= now - range)
     .sort((a, b) => a.timestamp - b.timestamp)
 
-  // If we have real monitoring data, use it
-  if (recentData.length > 0) {
-    // Group by hour and calculate average response time
-    const hourlyData: { time: string; responseTime: number; timestamp: number }[] = []
-    for (let i = hours; i >= 0; i--) {
-      const hourStart = now - (i * 60 * 60 * 1000)
-      const hourEnd = hourStart + (60 * 60 * 1000)
-
-      const hourData = recentData.filter(data =>
-        data.timestamp >= hourStart && data.timestamp < hourEnd
-      )
-
-      if (hourData.length > 0) {
-        const avgResponseTime = hourData.reduce((sum, data) => sum + data.responseTime, 0) / hourData.length
-        hourlyData.push({
-          time: new Date(hourStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          responseTime: Math.round(avgResponseTime),
-          timestamp: hourStart
-        })
-      } else {
-        // If no data for this hour, use previous hour's data or generate realistic fallback
-        const prevHourData = hourlyData[hourlyData.length - 1]
-        const fallbackResponseTime = prevHourData ? 
-          Math.max(50, prevHourData.responseTime + (Math.random() * 100 - 50)) : 
-          Math.random() * 300 + 100 // 100-400ms fallback
-        
-        hourlyData.push({
-          time: new Date(hourStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          responseTime: Math.round(fallbackResponseTime),
-          timestamp: hourStart
-        })
-      }
-    }
-    return hourlyData
-  }
-
-  // If no real data exists, generate realistic simulated data
-  const website = websites.find(w => w.id === websiteId)
-  if (!website) return []
-
-  const simulatedData: { time: string; responseTime: number; timestamp: number }[] = []
-  const baseResponseTime = website.responseTime || 200 // Use current response time or default
-  
-  for (let i = hours; i >= 0; i--) {
-    const hourStart = now - (i * 60 * 60 * 1000)
-    const timeOfDay = new Date(hourStart).getHours()
-    
-    // Simulate different response times based on time of day
-    let timeMultiplier = 1
-    if (timeOfDay >= 9 && timeOfDay <= 17) {
-      timeMultiplier = 0.8 // Faster during business hours
-    } else if (timeOfDay >= 22 || timeOfDay <= 6) {
-      timeMultiplier = 1.3 // Slower during off-peak hours
-    }
-    
-    // Add some random variation
-    const variation = (Math.random() * 0.4 + 0.8) * timeMultiplier // 0.8x to 1.2x
-    const responseTime = Math.round(baseResponseTime * variation)
-    
-    simulatedData.push({
-      time: new Date(hourStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      responseTime: Math.max(50, responseTime), // Minimum 50ms
-      timestamp: hourStart
-    })
-  }
-  
-  return simulatedData
+  // Return raw points (no fake smoothing); include status so UI can break the path on 'down'
+  return recent.map(d => ({
+    time: new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    responseTime: d.responseTime, // keep the raw number; we'll decide in the chart whether to draw it
+    timestamp: d.timestamp,
+    status: d.status
+  }))
 }
+
 
 // Check if monitoring is active
 export function isMonitoringActive(): boolean {

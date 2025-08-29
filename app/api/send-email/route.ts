@@ -2,87 +2,49 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function POST(request: NextRequest) {
   try {
-    const { to, subject, html, text } = await request.json()
+    const { to, subject, html, text, from, fromName } = await request.json()
 
     if (!to || !subject) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+      return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 })
     }
 
-    console.log(`📧 Sending email to: ${to}`)
-    console.log(`📧 Subject: ${subject}`)
+    if (!process.env.SENDGRID_API_KEY) {
+      return NextResponse.json({ success: false, error: "SENDGRID_API_KEY not configured" }, { status: 500 })
+    }
 
-    // Use your actual SendGrid API key
-    const SENDGRID_API_KEY = "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"
+    const sgMail = require("@sendgrid/mail")
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+
+    // Always use a verified sender for From. If client specified a different "from",
+    // set it as Reply-To to preserve deliverability.
+    const fromEmail = process.env.SENDGRID_FROM_EMAIL || "test@siteguard.com"
+    const fromDisplay = process.env.SENDGRID_FROM_NAME || "SiteGuard Pro"
+
+    const msg: any = {
+      to,
+      from: { email: fromEmail, name: fromDisplay },
+      subject,
+      html: html || (text ? `<pre>${text}</pre>` : "Message"),
+      // Optional nice-to-haves
+      trackingSettings: { clickTracking: { enable: true, enableText: true } },
+      mailSettings: { sandboxMode: { enable: false } },
+      categories: ["siteguard", "notification"],
+    }
+    if (from) {
+      msg.replyTo = { email: from, name: fromName || from }
+    }
 
     try {
-      const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${SENDGRID_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          personalizations: [
-            {
-              to: [{ email: to }],
-              subject: subject,
-            },
-          ],
-          from: {
-            email: "noreply@siteguardpro.com",
-            name: "SiteGuard Pro",
-          },
-          content: [
-            {
-              type: "text/html",
-              value: html || text || "Default message",
-            },
-          ],
-        }),
-      })
-
-      if (response.ok) {
-        console.log(`✅ Email sent successfully via SendGrid to: ${to}`)
-        return NextResponse.json({
-          success: true,
-          message: "Email sent successfully",
-          provider: "SendGrid",
-        })
-      } else {
-        const errorData = await response.json()
-        console.error(`❌ SendGrid error:`, errorData)
-
-        // Log detailed error for debugging
-        console.error(`SendGrid Response Status: ${response.status}`)
-        console.error(`SendGrid Response Headers:`, Object.fromEntries(response.headers.entries()))
-
-        return NextResponse.json(
-          {
-            success: false,
-            error: `SendGrid API error: ${response.status}`,
-            details: errorData,
-          },
-          { status: response.status },
-        )
-      }
-    } catch (error: any) {
-      console.error(`❌ SendGrid request error:`, error)
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Network error: ${error.message}`,
-        },
-        { status: 500 },
-      )
+      const [resp] = await sgMail.send(msg)
+      console.log(`✅ Email sent via SendGrid to ${to} (status ${resp?.statusCode})`)
+      return NextResponse.json({ success: true, message: "Email sent", statusCode: resp?.statusCode })
+    } catch (err: any) {
+      console.error("❌ SendGrid send error:", err?.response?.body || err)
+      const detail = err?.response?.body || { message: err?.message || "Send failed" }
+      return NextResponse.json({ success: false, error: "SendGrid send failed", details: detail }, { status: 502 })
     }
   } catch (error) {
     console.error("Email sending error:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Failed to process email request",
-      },
-      { status: 500 },
-    )
+    return NextResponse.json({ success: false, error: "Failed to process email request" }, { status: 500 })
   }
 }

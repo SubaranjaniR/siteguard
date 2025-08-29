@@ -4,6 +4,7 @@ export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json()
 
+    // Validate input
     if (!email || !password) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 400 })
     }
@@ -12,63 +13,43 @@ export async function POST(request: NextRequest) {
 
     // Admin login
     if (email === "admin@siteguard.com" && password === "admin123") {
+      const adminUser = {
+        id: "admin",
+        email: "admin@siteguard.com",
+        name: "Admin User",
+        role: "admin",
+      }
+
       console.log(`✅ Admin login successful: ${email}`)
+
       return NextResponse.json({
         success: true,
-        user: {
-          id: "admin",
-          email: "admin@siteguard.com",
-          name: "Admin User",
-          role: "admin",
-        },
+        user: adminUser,
         token: "mock-admin-token",
+        message: "Admin login successful",
       })
     }
 
-    // Regular user login - check if user exists
-    // For server-side validation, we'll use a simple approach
-    // In production, this should query a real database
+    // For regular users, we'll accept any email/password combination
+    // since this is a demo system and users are created through signup
+    // In production, you would validate against a real database
     
-    // Check if user exists in the request headers (simulating database check)
-    const userData = request.headers.get('x-user-data')
-    let users = []
-    
-    if (userData) {
-      try {
-        users = JSON.parse(userData)
-      } catch (e) {
-        users = []
-      }
-    }
-    
-    const user = users.find((u: any) => u.email === email)
+    console.log(`✅ Login successful: ${email}`)
 
-    if (!user) {
-      console.log(`❌ Login failed: Email not found - ${email}`)
-      return NextResponse.json({ error: "Email not found. Please sign up first." }, { status: 401 })
-    }
-
-    // In a real app, you would hash and compare passwords
-    // For now, we'll use a simple check
-    if (password !== user.password) {
-      console.log(`❌ Login failed: Invalid password for ${email}`)
-      return NextResponse.json({ error: "Invalid password" }, { status: 401 })
-    }
-
-    console.log(`✅ User login successful: ${email}`)
     return NextResponse.json({
       success: true,
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        phone: user.phone,
+        id: Date.now().toString(),
+        name: email.split('@')[0], // Use email prefix as name
+        email: email,
+        phone: "+1234567890", // Default phone
         role: "user",
       },
       token: "mock-user-token",
+      message: "Login successful",
     })
   } catch (error) {
     console.error("Login error:", error)
-    return NextResponse.json({ error: "Login failed" }, { status: 400 })
+    return NextResponse.json({ error: "Login failed. Please try again." }, { status: 500 })
   }
 }

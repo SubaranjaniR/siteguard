@@ -36,7 +36,7 @@ import {
 import Link from "next/link"
 import { requireAuth } from "@/lib/auth"
 import { updateUserActivity, initializeSystem } from "@/lib/users"
-import { initializeMonitoring, getWebsites, addWebsite, removeWebsite } from "@/lib/monitoring"
+import { initializeMonitoring, getWebsites, addWebsite, removeWebsite, calculateUptime } from "@/lib/monitoring"
 import { syncUserWebsites } from "@/lib/monitoring"
 
 interface ReferenceImage {
@@ -973,16 +973,12 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex items-center space-x-6">
                       <div className="text-center">
-                        <div className="text-sm font-medium">{website.uptime.toFixed(1)}%</div>
+                        <div className="text-sm font-medium">{calculateUptime(website.id, 60).toFixed(1)}%</div>
                         <div className="text-xs text-gray-500">Uptime</div>
                       </div>
                       <div className="text-center">
                         <div className="text-sm font-medium">{website.responseTime}ms</div>
                         <div className="text-xs text-gray-500">Response</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-sm font-medium">{website.lastChecked}</div>
-                        <div className="text-xs text-gray-500">Last Check</div>
                       </div>
                       {getStatusBadge(website.status)}
                       <div className="flex items-center space-x-2">

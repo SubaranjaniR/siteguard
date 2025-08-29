@@ -23,8 +23,19 @@ import {
   getAnalyticsData,
   getIncidents,
   syncUserWebsites,
-  deleteWebsite
+  deleteWebsite,
+  calculateUptime
 } from "@/lib/monitoring"
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid
+} from "recharts"
 
 export default function AnalyticsPage() {
   const { toast } = useToast()
@@ -36,7 +47,22 @@ export default function AnalyticsPage() {
   const [isMonitoring, setIsMonitoring] = useState(false)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const [refreshKey, setRefreshKey] = useState(0)
+  const [historyMap, setHistoryMap] = useState<{[websiteId: string]: any[]}>({});
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const stored = localStorage.getItem("siteguard_monitoring_history");
+      if (stored && websites.length > 0) {
+        const allHistory = JSON.parse(stored);
+        const newMap: {[websiteId: string]: any[]} = {};
+        websites.forEach(w => {
+          newMap[w.id] = allHistory.filter((h: any) => h.websiteId === w.id);
+        });
+        setHistoryMap(newMap);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [websites]);
   // Authentication check
   useEffect(() => {
     const checkAuth = () => {
@@ -106,10 +132,17 @@ export default function AnalyticsPage() {
       onlineWebsites: filteredWebsites.filter(w => w.status === 'up').length,
       offlineWebsites: filteredWebsites.filter(w => w.status === 'down').length,
       checkingWebsites: filteredWebsites.filter(w => w.status === 'checking').length,
-      avgResponseTime: filteredWebsites.length > 0 ? 
-        Math.round(filteredWebsites.reduce((acc, w) => acc + w.responseTime, 0) / filteredWebsites.length) : 0,
-      avgUptime: filteredWebsites.length > 0 ? 
-        Math.round(filteredWebsites.reduce((acc, w) => acc + w.uptime, 0) / filteredWebsites.length * 100) / 100 : 100
+      avgResponseTime: (() => {
+        const online = filteredWebsites.filter(w => w.status === 'up' && w.responseTime > 0)
+        if (online.length === 0) return 0
+        return Math.round(online.reduce((acc, w) => acc + w.responseTime, 0) / online.length)
+      })(),
+      avgUptime: filteredWebsites.length > 0 
+        ? Math.round(
+            filteredWebsites.reduce((acc, w) => acc + calculateUptime(w.id, 60), 0) 
+            / filteredWebsites.length * 100
+          ) / 100
+        : 0
     }
     
     return {
@@ -519,8 +552,10 @@ export default function AnalyticsPage() {
                 <div className="space-y-6">
                   {getFilteredWebsites().map((website) => {
                     // Get real-time response time history
-                    const responseTimeHistory = getResponseTimeHistory(website.id, 24)
-                    const maxResponseTime = Math.max(...responseTimeHistory.map(h => h.responseTime), 1)
+                    const responseTimeHistory = getResponseTimeHistory(website.id, 15)
+                    const drawable = responseTimeHistory.filter(p => p.status === 'up' && p.responseTime > 0)
+                    const maxResponseTime = Math.max(...drawable.map(h => h.responseTime), 1)
+                    
                     const minResponseTime = Math.min(...responseTimeHistory.map(h => h.responseTime))
                     const avgResponseTime = Math.round(responseTimeHistory.reduce((sum, h) => sum + h.responseTime, 0) / responseTimeHistory.length)
 
@@ -534,11 +569,15 @@ export default function AnalyticsPage() {
                           <div className="flex items-center space-x-4">
                             <div className="text-center">
                               <p className="text-xs text-gray-400">Current</p>
-                              <p className="text-lg font-bold text-blue-400">{website.responseTime}ms</p>
+                              <p className="text-lg font-bold text-blue-400">
+                                {website.status === "up" && website.responseTime > 0 ? `${website.responseTime}ms` : "N/A"}
+                              </p>
                             </div>
                             <div className="text-center">
                               <p className="text-xs text-gray-400">Uptime</p>
-                              <p className="text-lg font-bold text-green-400">{website.uptime.toFixed(1)}%</p>
+                              <p className="text-lg font-bold text-green-400">
+                                {calculateUptime(website.id, 60).toFixed(1)}%
+                              </p>
                             </div>
                             <Button
                               variant="destructive"
@@ -576,52 +615,38 @@ export default function AnalyticsPage() {
                               ))}
                             </div>
                             
-                            {/* Response time line */}
-                            <svg className="w-full h-32" viewBox="0 0 100 32">
-                              <defs>
-                                <linearGradient id="responseGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                                  <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.8" />
-                                  <stop offset="100%" stopColor="#fbbf24" stopOpacity="0.2" />
-                                </linearGradient>
-                              </defs>
-                              
-                              {/* Area fill */}
-                              <path
-                                d={responseTimeHistory.map((data, index) => {
-                                  const x = (index / (responseTimeHistory.length - 1)) * 100
-                                  const y = 32 - (data.responseTime / maxResponseTime) * 32
-                                  return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
-                                }).join(' ') + ` L 100 32 L 0 32 Z`}
-                                fill="url(#responseGradient)"
-                              />
-                              
-                              {/* Line */}
-                              <path
-                                d={responseTimeHistory.map((data, index) => {
-                                  const x = (index / (responseTimeHistory.length - 1)) * 100
-                                  const y = 32 - (data.responseTime / maxResponseTime) * 32
-                                  return `${index === 0 ? 'M' : 'L'} ${x} ${y}`
-                                }).join(' ')}
-                                stroke="#fbbf24"
-                                strokeWidth="2"
-                                fill="none"
-                              />
-                              
-                              {/* Data points */}
-                              {responseTimeHistory.map((data, index) => {
-                                const x = (index / (responseTimeHistory.length - 1)) * 100
-                                const y = 32 - (data.responseTime / maxResponseTime) * 32
-                                return (
-                                  <circle
-                                    key={index}
-                                    cx={x}
-                                    cy={y}
-                                    r="2"
-                                    fill="#fbbf24"
-                                  />
-                                )
-                              })}
-                            </svg>
+                            <ResponsiveContainer width="100%" height={200}>
+                              <LineChart data={drawable}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                                <XAxis
+                                  dataKey="timestamp"
+                                  tickFormatter={(ts) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                  tick={{ fill: "#9ca3af", fontSize: 12 }}
+                                />
+                                <YAxis
+                                  tick={{ fill: "#9ca3af", fontSize: 12 }}
+                                  domain={["auto", "auto"]}
+                                  unit="ms"
+                                />
+                                <Tooltip
+                                  labelFormatter={(ts) => new Date(ts).toLocaleTimeString()}
+                                  formatter={(value) => [`${value} ms`, "Response Time"]}
+                                />
+                                <Line
+                                  type="monotone"
+                                  dataKey="responseTime"
+                                  stroke="#22c55e"
+                                  strokeWidth={2}
+                                  dot={false}
+                                  isAnimationActive={true}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                              {drawable.length === 0 && (
+                                <div className="mt-2 text-xs text-red-400">
+                                  No live response-time data to show (site may be offline or not enough recent checks).
+                                </div>
+                              )}
                             
                             {/* X-axis labels */}
                             <div className="flex justify-between text-xs text-gray-400 mt-2">
@@ -665,13 +690,8 @@ export default function AnalyticsPage() {
                           </div>
                           <div className="bg-gray-800 rounded-lg p-3 text-center">
                             <p className="text-xs text-gray-400">Uptime</p>
-                            <p className="text-lg font-bold text-green-400">{website.uptime.toFixed(1)}%</p>
-                          </div>
-                          <div className="bg-gray-800 rounded-lg p-3 text-center">
-                            <p className="text-xs text-gray-400">Last Check</p>
-                            <p className="text-sm font-medium text-white">{new Date(website.lastChecked).toLocaleTimeString()}</p>
-                            <p className="text-xs text-gray-400 mt-1">
-                              {Math.round((Date.now() - new Date(website.lastChecked).getTime()) / 1000)}s ago
+                            <p className="text-lg font-bold text-green-400">
+                              {calculateUptime(website.id, 60).toFixed(1)}%
                             </p>
                           </div>
                         </div>
@@ -720,9 +740,26 @@ export default function AnalyticsPage() {
                       return { grade: "F", color: "text-red-600", bg: "bg-red-100" }
                     }
 
-                    const speedGrade = getSpeedGrade(website.responseTime)
-                    const uptimePercentage = website.uptime
-                    const lastChecked = new Date(website.lastChecked).toLocaleString()
+                    const speedGrade = (() => {
+                      if (website.status !== 'up' || website.responseTime <= 0) {
+                        return { grade: "F", color: "text-red-600", bg: "bg-red-100" }
+                      }
+                      return getSpeedGrade(website.responseTime)
+                    })()
+                    const uptimePercentage = calculateUptime(website.id, 60)
+                    const resolvedLastCheck = (() => {
+                      const ts = Date.parse(website.lastChecked)
+                      if (!isNaN(ts)) return new Date(ts)
+                      try {
+                        const history = getMonitoringData(website.id) || []
+                        if (history.length > 0) {
+                          const latest = history.reduce((a: any, b: any) => (a.timestamp > b.timestamp ? a : b))
+                          return new Date(latest.timestamp)
+                        }
+                      } catch {}
+                      return null as any
+                    })()
+                    const lastChecked = resolvedLastCheck ? resolvedLastCheck.toLocaleString() : "—"
 
                     return (
                       <div key={website.id} className="border rounded-lg p-4">
@@ -765,7 +802,9 @@ export default function AnalyticsPage() {
                             <div className="flex items-center justify-between">
                               <div>
                                 <p className="text-sm text-gray-600">Response Time</p>
-                                <p className="text-xl font-bold">{website.responseTime}ms</p>
+                                <p className="text-xl font-bold">
+                                  {website.status === 'up' && website.responseTime > 0 ? `${website.responseTime}ms` : 'N/A'}
+                                </p>
                               </div>
                               <Clock className="w-5 h-5 text-blue-500" />
                             </div>
@@ -773,12 +812,13 @@ export default function AnalyticsPage() {
                               <div className="w-full bg-gray-200 rounded-full h-2">
                                 <div 
                                   className={`h-2 rounded-full ${
+                                    website.status !== 'up' || website.responseTime <= 0 ? "bg-gray-400" :
                                     website.responseTime < 200 ? "bg-green-500" :
                                     website.responseTime < 500 ? "bg-blue-500" :
                                     website.responseTime < 1000 ? "bg-yellow-500" :
                                     website.responseTime < 2000 ? "bg-orange-500" : "bg-red-500"
                                   }`}
-                                  style={{ width: `${Math.min((website.responseTime / 2000) * 100, 100)}%` }}
+                                  style={{ width: `${website.status !== 'up' || website.responseTime <= 0 ? 0 : Math.min((website.responseTime / 2000) * 100, 100)}%` }}
                                 ></div>
                               </div>
                             </div>
@@ -827,8 +867,9 @@ export default function AnalyticsPage() {
                               <Calendar className="w-5 h-5 text-gray-500" />
                             </div>
                             <p className="text-xs text-gray-500 mt-1">
-                              {website.status === "checking" ? "Checking..." : 
-                               `${Math.round((Date.now() - new Date(website.lastChecked).getTime()) / 1000)}s ago`}
+                              {website.status === "checking" ? "Checking..." : (
+                                resolvedLastCheck ? `${Math.round((Date.now() - resolvedLastCheck.getTime()) / 1000)}s ago` : "—"
+                              )}
                             </p>
                           </div>
                         </div>
@@ -859,20 +900,20 @@ export default function AnalyticsPage() {
                         <div className="mt-4 p-3 bg-gray-50 rounded-lg">
                           <h4 className="text-sm font-medium text-gray-700 mb-2">Speed Recommendations</h4>
                           <div className="space-y-1">
-                            {website.responseTime > 1000 && (
+                            {website.status === 'up' && website.responseTime > 1000 && (
                               <p className="text-xs text-red-600">⚠️ Response time is slow. Consider optimizing your website.</p>
                             )}
-                            {website.responseTime > 2000 && (
+                            {website.status === 'up' && website.responseTime > 2000 && (
                               <p className="text-xs text-red-600">🚨 Response time is very slow. Immediate optimization needed.</p>
                             )}
-                            {website.responseTime < 500 && (
+                            {website.status === 'up' && website.responseTime > 0 && website.responseTime < 500 && (
                               <p className="text-xs text-green-600">✅ Excellent response time! Your website is performing well.</p>
                             )}
                             {uptimePercentage < 99 && (
                               <p className="text-xs text-orange-600">⚠️ Uptime below 99%. Monitor for potential issues.</p>
                             )}
                           </div>
-                          {isMonitoring && (
+                          {isMonitoring && website.status === 'up' && (
                             <div className="flex items-center mt-2 pt-2 border-t border-gray-200">
                               <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
                               <span className="text-xs text-green-600">Real-time monitoring active</span>
